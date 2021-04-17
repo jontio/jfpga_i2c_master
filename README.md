@@ -16,13 +16,13 @@ I started with code from https://github.com/mcgodfrey/i2c-eeprom , wrote a test 
 
 ### Directory structure
 
-lib contains the driver modules needed for the I2C master device and the example project.
+[lib](lib) contains the driver modules needed for the I2C master device and the example project.
 
-lib/i2c is the folder that contains the I2C master device
+[lib/i2c](lib/i2c) is the folder that contains the I2C master device and is probably the one you will be interested in if you're reading this page.
 
-testbench contains a test bench for qualifying the I2C device and instructions on how to use it with modelsim.
+[testbench](testbench) contains a test bench for qualifying the I2C device and instructions on how to use it with modelsim.
 
-example contains a Quartus II project For the hardware that I used as well as some information about the setup.
+[example](example) contains a Quartus II project for the hardware that I used as well as some information about the setup.
 
 Jonti<br>
 2021
