@@ -758,7 +758,6 @@ task TEST_CONTINIOUS_START_TRIGGER();
     i2c_expected_byte=i2c_write_data;
     i2c_start=1;
     clk();
-    //i2c_start=0;
     //wait for start
     wait_for_start(2);
     //read the next 8 bits
@@ -776,9 +775,9 @@ task TEST_CONTINIOUS_START_TRIGGER();
     end
     send_ack_nak(ACK);
     //read the bytes the i2c device sends and send back acks 
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(i2c_bytes_to_send_counter=1;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
-        i2c_write_data=i2c_bytes_to_send[i2c_bytes_to_send_counter+1];
+        i2c_write_data=i2c_bytes_to_send[i2c_bytes_to_send_counter];
         read_bits_from_i2c_sda_w(8);
         send_ack_nak(ACK);
         if(i2c_rx_byte[7:0]!=i2c_expected_byte)
@@ -789,8 +788,15 @@ task TEST_CONTINIOUS_START_TRIGGER();
         end
         i2c_expected_byte=i2c_write_data;
     end
-    //wait for stop
-    ///wait_for_stop(2);
+    read_bits_from_i2c_sda_w(8);
+    send_ack_nak(ACK);
+    if(i2c_rx_byte[7:0]!=i2c_expected_byte)
+    begin
+        $display("received data=%B (%h)",i2c_rx_byte[7:0],i2c_rx_byte[7:0]);
+        $display("did not receive expected i2c data");
+        $stop();
+    end
+    //change mode to read while still transmitting to produce a repeated start
     i2c_nbytes_in=i2c_bytes_to_send_size;
     i2c_rw_mode=I2C_MODE_READ;
     i2c_addr_in=I2C_ADDRESS;
