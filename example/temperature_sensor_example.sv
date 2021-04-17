@@ -7,7 +7,7 @@ parameter SEGS=3,//3 segments
 parameter LED_UPDATE_RATE=90, //90Hz
 parameter LED_UPDATE_RATE_MAX_ERROR=0.25,//for 90Hz --> 67.5Hz to 112.5Hz (actually produces 95Hz with current code)
 
-parameter I2C_BAUD_RATE = 100000,
+parameter I2C_BAUD_RATE = 400000,
 parameter I2C_BAUD_RATE_MAX_ERROR=0.25,
 
 parameter TEMPERATURE_SENSOR_READ_DELAY=CLK_SYSTEM_FREQUENCY/2//update rate between temperature sensor reads in system clock cycles

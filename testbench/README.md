@@ -1,3 +1,7 @@
+# Test bench for qualifying the I2C master device
+
+![](../images/testbench.png)
+
 Quartus sucks and I could not get this testbed working when launching it from Quartus due to it not adding the paths of the libraries to the do file. ARRRRGH!!!!
 
 If you try to run this testbench from Quartus it will fail.
