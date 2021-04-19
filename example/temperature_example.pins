@@ -21,6 +21,8 @@ set_location_assignment PIN_B20 -to i2c_sda_w
 
 #-------------pin assignments options
 
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to clk_50M
+
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to led
 
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to segData[7]

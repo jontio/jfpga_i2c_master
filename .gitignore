@@ -2,6 +2,7 @@ testbench/rtl_work
 testbench/modelsim.ini
 testbench/vsim.wlf
 
+*.bak
 example/db
 example/incremental_db
 example/output_files
