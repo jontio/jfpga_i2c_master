@@ -5,6 +5,8 @@
 I2C Master testbench
 Jonti 2021
 
+Yup terrible. Not DRY at all. Please tidy :)
+
 */
 
 `include "i2c_master.sv"
@@ -16,6 +18,7 @@ Jonti 2021
 `define TEST_READ_BYTES_FROM_SLAVE
 `define TEST_READ_BYTES_FROM_SLAVE_WITH_CLOCK_STREACHING
 `define TEST_CONTINIOUS_START_TRIGGER
+`define TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES
 
 //verilog is so stupid!!!!! I can't even seem to get the thing to calculate the size of `I2C_BYTES_TO_USE
 `define I2C_BYTES_TO_USE '{8'h26,8'hC7,8'h86}
@@ -28,7 +31,7 @@ localparam LOW = 0;
 localparam ACK = 0;
 localparam NAK = 1;
 
-parameter PERIOD=8000;
+parameter PERIOD=20000;
 parameter CLK_SYSTEM_FREQUENCY = 50000000;
 
 parameter I2C_ADDRESS = 7'h45;
@@ -226,6 +229,8 @@ task wait_for_stop(int number_of_bits_to_wait_for);
         $display("i2c_stop_detected wasn't detected");
         $stop();
     end
+	//one clock as the syncronizer takes one clock cycle to pass data
+	clk();	
 endtask
 
 task wait_for_scl_to_be(logic desired_i2c_scl_w,int number_of_bits_to_wait_for);
@@ -861,6 +866,118 @@ task TEST_CONTINIOUS_START_TRIGGER();
     end
 endtask
 
+logic stop_latch;
+logic i2c_bus_idle_latch;
+task TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES();
+    $display("test for two writes such that second one happens about the the same time as the first one finishes");
+	for(int test_number=0;test_number<10;test_number++)
+	begin	
+		i2c_nbytes_in=1;
+		i2c_rw_mode=I2C_MODE_WRITE;
+		i2c_addr_in=I2C_ADDRESS;
+		i2c_write_data=i2c_bytes_to_send[0];
+		i2c_start=1;
+		clk();
+		i2c_start=0;
+		//wait for start
+		wait_for_start(2);
+		//read the next 8 bits
+		read_bits_from_i2c_sda_w(8);
+		if(i2c_rx_byte[7:1]!=i2c_addr_in)
+		begin
+			$display("received address=%B (%h)",i2c_rx_byte[7:1],i2c_rx_byte[7:1]);
+			$display("did not receive expected i2c address");
+			$stop();
+		end
+		if(i2c_rx_byte[0]!=i2c_rw_mode)
+		begin
+			$display("did not receive expected i2c rw mode");
+			$stop();
+		end
+		send_ack_nak(ACK);
+		//read the bytes the i2c device sends and send back acks 
+		read_bits_from_i2c_sda_w(8);
+		send_ack_nak(ACK);
+		if(i2c_rx_byte[7:0]!=i2c_write_data)
+		begin
+			$display("received data=%B (%h)",i2c_rx_byte[7:0],i2c_rx_byte[7:0]);
+			$display("did not receive expected i2c data");
+			$stop();
+		end
+		//send a start pulse after a bit of a delay
+		stop_latch=0;
+		for(int mmm=0;mmm<test_number;mmm++)
+		begin
+			if(i2c_stop_detected)stop_latch=1;
+			clk();
+			if(i2c_stop_detected)stop_latch=1;
+		end
+		i2c_bus_idle_latch=i2c_bus_idle;
+		i2c_start=1;
+		clk();
+		i2c_start=0;
+		if(i2c_stop_detected)stop_latch=1;
+		if(!stop_latch)wait_for_stop(10);
+		//wait for a start but dont fail if we dont get it as we may have sent the start pulse too early for it to be registered
+		for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*2;i=i+1)
+		begin
+			clk();
+			if(i2c_start_detected)break;
+		end
+		if(i2c_start_detected)
+		begin
+			//receive this data too
+			$display("i2c_start_detected");
+			//read the next 8 bits
+			read_bits_from_i2c_sda_w(8);
+			if(i2c_rx_byte[7:1]!=i2c_addr_in)
+			begin
+				$display("received address=%B (%h)",i2c_rx_byte[7:1],i2c_rx_byte[7:1]);
+				$display("did not receive expected i2c address");
+				$stop();
+			end
+			if(i2c_rx_byte[0]!=i2c_rw_mode)
+			begin
+				$display("did not receive expected i2c rw mode");
+				$stop();
+			end
+			send_ack_nak(ACK);
+			//read the bytes the i2c device sends and send back acks 
+			read_bits_from_i2c_sda_w(8);
+			send_ack_nak(ACK);
+			if(i2c_rx_byte[7:0]!=i2c_write_data)
+			begin
+				$display("received data=%B (%h)",i2c_rx_byte[7:0],i2c_rx_byte[7:0]);
+				$display("did not receive expected i2c data");
+				$stop();
+			end
+			//wait for stop
+			wait_for_stop(2);
+			if(!i2c_bus_idle)
+			begin
+				$display("bus not idle");
+				$stop();
+			end
+			if(i2c_tranfer_failed_detected)
+			begin
+				$display("i2c_tranfer_failed_detected");
+				$stop();
+			end
+		end
+		else
+		begin
+			if(i2c_bus_idle_latch)
+			begin
+				//note im not that interested in i2c_bus_idle begin low and the i2c master sending our packet. thats the problem of the whoever is using this module if they ignore the state of the idle signal
+				$display("i2c_bus_idle said it was idle and our start pulse was ignored");
+			end
+		end
+		//wait a few cycles so its easier to see where the tests start and stop
+		i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);	
+	end
+	$display("test done");
+endtask
+
 initial begin
 
 `ifdef TEST_FAILS_ON_NO_SLAVE_ATTATCHED_WRITE
@@ -900,6 +1017,11 @@ initial begin
 `ifdef TEST_CONTINIOUS_START_TRIGGER
     i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);
     TEST_CONTINIOUS_START_TRIGGER();
+`endif
+
+`ifdef TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES
+    i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);
+    TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES();
 `endif
 
     i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);

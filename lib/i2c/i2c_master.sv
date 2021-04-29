@@ -2,6 +2,8 @@
 `define I2C_MASTER_H
 `include "bit_tick.sv"
 
+//`define I2C_MASTER_DISABLE_ACK_CHECKS
+
 //Jonti
 //2021
 //code modified from https://github.com/mcgodfrey/i2c-eeprom
@@ -128,20 +130,6 @@ end
 assign sda_w=(sda)?1'bz:1'b0;
 assign scl_w=(scl)?1'bz:1'b0;
 
-//used for user to see when ok to start a transaction
-wand i2c_bus_available;
-assign i2c_bus_available=1;
-assign i2c_bus_available=(state==STATE_IDLE);
-assign i2c_bus_available=sda_w;
-assign i2c_bus_available=scl_w;
-assign i2c_bus_available=~start;
-assign i2c_bus_available=~start_trigger;
-assign idle=i2c_bus_available;
-
-//clock
-//scl is enabled whenever we are sending or receiving data.
-assign scl=(scl_en)?(i2c_clock_hold||i2c_clock_state==CLK_STATE_MIDDLE_OF_HIGH||i2c_clock_state==CLK_STATE_HIGH_TO_LOW_TRANSITION):1'b1;
-
 wand sda_w_wand;
 assign sda_w_wand=sda_w;
 assign sda_w_wand=1'b1;
@@ -149,6 +137,31 @@ assign sda_w_wand=1'b1;
 wand scl_w_wand;
 assign scl_w_wand=scl_w;
 assign scl_w_wand=1'b1;
+
+//syncronizer for bus input as the slave may not transition the clk or the data lines when we would like them to do so.
+logic scl_w_wand_in;
+logic sda_w_wand_in;
+always@(posedge clk)
+begin
+	scl_w_wand_in<=scl_w_wand;
+	sda_w_wand_in<=sda_w_wand;
+end
+
+wand i2c_bus_lines_are_high;
+assign i2c_bus_lines_are_high=scl_w_wand_in;
+assign i2c_bus_lines_are_high=sda_w_wand_in;
+
+//used for user to see when ok to start a transaction
+wand i2c_bus_available;
+assign i2c_bus_available=(state==STATE_IDLE);
+assign i2c_bus_available=~start;
+assign i2c_bus_available=~start_trigger;
+assign i2c_bus_available=i2c_bus_lines_are_high;
+assign idle=i2c_bus_available;
+
+//clock
+//scl is enabled whenever we are sending or receiving data.
+assign scl=(scl_en)?(i2c_clock_hold||i2c_clock_state==CLK_STATE_MIDDLE_OF_HIGH||i2c_clock_state==CLK_STATE_HIGH_TO_LOW_TRANSITION):1'b1;
 
 always@(posedge clk)
 begin
@@ -164,7 +177,7 @@ begin
 
 		if(i2c_clock_state==CLK_STATE_MIDDLE_OF_HIGH)//start/stop send time. scl will be high here
 		begin
-			if(scl_w_wand==0)
+			if(scl_w_wand_in==0)
 			begin
 				if(!i2c_clock_hold)
 				begin
@@ -183,7 +196,7 @@ begin
 				STATE_IDLE,STATE_START:
 				begin
 					sda<=1;
-					if((start&&state==STATE_IDLE)||(state==STATE_START))
+					if((i2c_bus_lines_are_high&&start&&state==STATE_IDLE)||(state==STATE_START))
 					begin
 						state<=STATE_ADDR;
 						sda<=0;	//send start condition
@@ -206,32 +219,36 @@ begin
 					//last byte. on the sht30 it acks the last byte so I'm go for that.
 					//if you have issues with the last byte being naked and that's what
 					//you expect then comment out this
-					if(rw==I2C_MODE_WRITE&&sda_w_wand)
+					if(rw==I2C_MODE_WRITE&&sda_w_wand_in)
 					begin
+						`ifndef I2C_MASTER_DISABLE_ACK_CHECKS 
 						$display("no responce from slave for the last byte");
 						tranfer_failed<=1;
+						`endif
 					end
 				end
 				STATE_TX_DATA,STATE_RX_DATA:
 				begin
 					if((bit_count==7&&state==STATE_TX_DATA)||(bit_count==8&&state==STATE_RX_DATA))
 					begin
-						if(sda_w_wand)
+						if(sda_w_wand_in)
 						begin
+							`ifndef I2C_MASTER_DISABLE_ACK_CHECKS
 							$display("no responce from slave");
 							tranfer_failed<=1;
 							state <= STATE_STOP;
+							`endif
 						end				
 					end
 					if(state==STATE_RX_DATA)
 					begin
-						data[bit_count]<=sda_w_wand;
+						data[bit_count]<=sda_w_wand_in;
 						if(bit_count==0)
 						begin
 							//byte transfer complete
 							state<=STATE_ACK;
 							read_data[7:1]<=data[7:1];
-							read_data[0]<=sda_w_wand;
+							read_data[0]<=sda_w_wand_in;
 							rx_data_ready<=1;
 							nbytes<=nbytes-1'b1;
 						end
@@ -320,7 +337,7 @@ begin
 			begin
 				sda<=0;
 				state<=STATE_IDLE;
-			end	
+			end
 			endcase
 		end
 	end

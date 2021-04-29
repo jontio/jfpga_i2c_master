@@ -1,3 +1,7 @@
+*
+!/**/
+!*.*
+
 testbench/rtl_work
 testbench/modelsim.ini
 testbench/vsim.wlf

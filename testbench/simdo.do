@@ -10,5 +10,9 @@ vsim -t 1ps -L altera_ver -L lpm_ver -L sgate_ver -L altera_mf_ver -L altera_lns
 
 #add wave -position end -radix hexadecimal sim:/i2c_master_testbench/*
 add wave -position end -radix hexadecimal sim:/i2c_master_testbench/i2c_master0/*
+
+##just the leaf names please
+config wave -signalnamewidth 1
+
 run -all
 wave zoom full
