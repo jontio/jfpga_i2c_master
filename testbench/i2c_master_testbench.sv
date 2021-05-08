@@ -19,6 +19,7 @@ Yup terrible. Not DRY at all. Please tidy :)
 `define TEST_READ_BYTES_FROM_SLAVE_WITH_CLOCK_STREACHING
 `define TEST_CONTINIOUS_START_TRIGGER
 `define TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES
+`define TEST_READ_BYTES_FROM_SLAVE_WITH_LOCKED_BUS
 
 //verilog is so stupid!!!!! I can't even seem to get the thing to calculate the size of `I2C_BYTES_TO_USE
 `define I2C_BYTES_TO_USE '{8'h26,8'hC7,8'h86}
@@ -38,6 +39,7 @@ parameter I2C_ADDRESS = 7'h45;
 
 parameter I2C_BAUD_RATE = CLK_SYSTEM_FREQUENCY/8;
 parameter I2C_BAUD_RATE_MAX_ERROR=0.25;
+parameter I2C_TIMEOUT_IN_I2C_CLKS=50;
 
 parameter I2C_CLK_SYSTEM_CYCLES_PER_BIT=CLK_SYSTEM_FREQUENCY/I2C_BAUD_RATE;
 
@@ -69,6 +71,7 @@ logic i2c_tx_data_req;
 logic i2c_rx_data_ready; 
 logic i2c_bus_idle;
 logic i2c_tranfer_failed;
+logic i2c_tranfer_timeout;
 //for deployment
 // wire i2c_sda_w;
 // wire i2c_scl_w;
@@ -76,7 +79,8 @@ i2c_master
 #(
     .CLK_SYSTEM_FREQUENCY(CLK_SYSTEM_FREQUENCY),
     .I2C_BAUD_RATE(I2C_BAUD_RATE),
-    .I2C_BAUD_RATE_MAX_ERROR(I2C_BAUD_RATE_MAX_ERROR)
+    .I2C_BAUD_RATE_MAX_ERROR(I2C_BAUD_RATE_MAX_ERROR),
+    .I2C_TIMEOUT_IN_I2C_CLKS(I2C_TIMEOUT_IN_I2C_CLKS-10)
 )
 i2c_master0
 (
@@ -92,7 +96,8 @@ i2c_master0
 	.sda_w(i2c_sda_w),
 	.scl_w(i2c_scl_w),
     .idle(i2c_bus_idle),
-    .tranfer_failed(i2c_tranfer_failed)
+    .tranfer_failed(i2c_tranfer_failed),
+    .tranfer_timeout(i2c_tranfer_timeout)
 );
 
 
@@ -105,7 +110,6 @@ task clk();
 	clk_50M=~clk_50M; 
 endtask
 
-integer i;
 integer test_clock_streaching_delay_clks=0;
 
 logic i2c_start_detected;
@@ -132,14 +136,14 @@ begin
 end
 
 task i2c_clk_cycles_wait(int number_of_i2c_clk_cycles_to_wait_for);
-    for(i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_i2c_clk_cycles_to_wait_for;i=i+1)
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_i2c_clk_cycles_to_wait_for;i=i+1)
     begin
         clk();
     end
 endtask
 
 task i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(int number_of_i2c_clk_cycles_to_wait_for);
-    for(i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_i2c_clk_cycles_to_wait_for;i=i+1)
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_i2c_clk_cycles_to_wait_for;i=i+1)
     begin
         clk();
         if(i2c_bus_idle_change_detected)
@@ -175,11 +179,11 @@ task i2c_transfer_task();
     clk();
     i2c_start=0;
     //wait till finished or timeout
-    for(i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*11&&(!i2c_bus_idle);i=i+1)clk();//(11=1start+8bits+1ack+1stop)
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*11&&(!i2c_bus_idle);i=i+1)clk();//(11=1start+8bits+1ack+1stop)
 endtask
 
 task wait_for_start(int number_of_bits_to_wait_for);
-    for(i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for;i=i+1)
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for;i=i+1)
     begin
         clk();
         if(i2c_bus_idle)
@@ -208,7 +212,7 @@ task wait_for_stop(int number_of_bits_to_wait_for);
         $display("bus unexpectedly idle");
         $stop();
     end
-    for(i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for;i=i+1)
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for;i=i+1)
     begin
         clk();
         if(i2c_start_detected||i2c_stop_detected)break;
@@ -230,11 +234,11 @@ task wait_for_stop(int number_of_bits_to_wait_for);
         $stop();
     end
 	//one clock as the syncronizer takes one clock cycle to pass data
-	clk();	
+	clk();
 endtask
 
 task wait_for_scl_to_be(logic desired_i2c_scl_w,int number_of_bits_to_wait_for);
-    for(i=0;i<(I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for)&&(i2c_scl_w!=desired_i2c_scl_w);i=i+1)
+    for(int i=0;i<(I2C_CLK_SYSTEM_CYCLES_PER_BIT*number_of_bits_to_wait_for)&&(i2c_scl_w!=desired_i2c_scl_w);i=i+1)
     begin
         clk();
         if(i2c_bus_idle)
@@ -262,10 +266,9 @@ task wait_for_scl_to_be(logic desired_i2c_scl_w,int number_of_bits_to_wait_for);
 endtask
 
 logic [8:0] i2c_rx_byte;
-int k;
 task read_bits_from_i2c_sda_w(int number_of_bits_to_read);
     i2c_rx_byte=9'bx;
-    for(k=0;k<number_of_bits_to_read;k=k+1)
+    for(int k=0;k<number_of_bits_to_read;k=k+1)
     begin
         wait_for_scl_to_be(LOW,2);
         wait_for_scl_to_be(HIGH,2);
@@ -277,7 +280,7 @@ endtask
 
 logic [8:0] i2c_tx_byte;
 task write_bits_to_i2c_sda_w(int number_of_bits_to_write);
-    for(k=0;k<number_of_bits_to_write;k=k+1)
+    for(int k=0;k<number_of_bits_to_write;k=k+1)
     begin
         wait_for_scl_to_be(LOW,2);
         //$display("writing bit=%d of value=%b",k,i2c_tx_byte[number_of_bits_to_write-1-k]);
@@ -298,7 +301,6 @@ endtask
 
 logic [7:0] i2c_bytes_to_send [`I2C_BYTES_TO_USE_NUMBER_OF_BYTES]=`I2C_BYTES_TO_USE;
 parameter i2c_bytes_to_send_size=$bits(i2c_bytes_to_send)/8;
-int i2c_bytes_to_send_counter;
 logic [7:0] i2c_expected_byte;
 
 task TEST_FAILS_ON_NO_SLAVE_ATTATCHED_WRITE();
@@ -364,7 +366,7 @@ task TEST_WRITE_BYTES_TO_SLAVE();
     end
     send_ack_nak(ACK);
     //read the bytes the i2c device sends and send back acks 
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_write_data=i2c_bytes_to_send[i2c_bytes_to_send_counter+1];
         read_bits_from_i2c_sda_w(8);
@@ -460,7 +462,7 @@ task TEST_READ_BYTES_FROM_SLAVE();
     end
     send_ack_nak(ACK);
     //send bytes for i2c to read
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_tx_byte[7:0]=i2c_bytes_to_send[i2c_bytes_to_send_counter];
         write_bits_to_i2c_sda_w(8);//write the byte
@@ -487,7 +489,7 @@ task TEST_READ_BYTES_FROM_SLAVE();
     begin
         $display("got ack from i2c master but master doesn't have any more bytes to read");
         $stop();
-     end
+    end
     //wait for stop
     wait_for_stop(2);
     if(!i2c_bus_idle)
@@ -534,11 +536,11 @@ task TEST_READ_BYTES_FROM_SLAVE_WITH_CLOCK_STREACHING();
     i2c_scl_private=1;//stop clock streach
 
     //send bytes for i2c to read
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_tx_byte[7:0]=i2c_bytes_to_send[i2c_bytes_to_send_counter];
         //write the byte with some various place to streach the clock
-        for(k=0;k<8;k=k+1)
+        for(int k=0;k<8;k=k+1)
         begin
             wait_for_scl_to_be(LOW,2);
             if(i2c_bytes_to_send_counter==0&&k!=2)
@@ -640,39 +642,39 @@ task TEST_READ_BYTES_FROM_SLAVE_WITH_CLOCK_STREACHING();
         send_ack_nak(ACK);
 
         i2c_scl_private=0;//start clock streach
-        for(i=0;i<test_clock_streaching_delay_clks;i++)clk();
+        for(int i=0;i<test_clock_streaching_delay_clks;i++)clk();
         i2c_scl_private=1;//stop clock streach
 
         //send bytes for i2c to read
-        for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+        for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
         begin
-        i2c_tx_byte[7:0]=i2c_bytes_to_send[i2c_bytes_to_send_counter];
-        //write the byte with some various place to streach the clock
-        for(k=0;k<8;k=k+1)
-        begin
-            wait_for_scl_to_be(LOW,2);
-            //$display("writing bit=%d of value=%b",k,i2c_tx_byte[number_of_bits_to_write-1-k]);
-            i2c_sda_private=i2c_tx_byte[8-1-k];
-            wait_for_scl_to_be(HIGH,2);
-            wait_for_scl_to_be(LOW,2);
-        end
-        i2c_sda_private=NAK;
-        read_bits_from_i2c_sda_w(1);//read the ack/nak
-        if(i2c_bytes_to_send_counter!=(i2c_bytes_to_send_size-1))
-        begin
-            if(i2c_rx_byte[0]==NAK)
+            i2c_tx_byte[7:0]=i2c_bytes_to_send[i2c_bytes_to_send_counter];
+            //write the byte with some various place to streach the clock
+            for(int k=0;k<8;k=k+1)
             begin
-                $display("got nak from i2c master but master still has bytes to read");
+                wait_for_scl_to_be(LOW,2);
+                //$display("writing bit=%d of value=%b",k,i2c_tx_byte[number_of_bits_to_write-1-k]);
+                i2c_sda_private=i2c_tx_byte[8-1-k];
+                wait_for_scl_to_be(HIGH,2);
+                wait_for_scl_to_be(LOW,2);
+            end
+            i2c_sda_private=NAK;
+            read_bits_from_i2c_sda_w(1);//read the ack/nak
+            if(i2c_bytes_to_send_counter!=(i2c_bytes_to_send_size-1))
+            begin
+                if(i2c_rx_byte[0]==NAK)
+                begin
+                    $display("got nak from i2c master but master still has bytes to read");
+                    $stop();
+                end
+            end
+            if(i2c_read_data!=i2c_tx_byte[7:0])
+            begin
+                $display("sent data=%B (%h)",i2c_tx_byte[7:0],i2c_tx_byte[7:0]);
+                $display("received data=%B (%h)",i2c_read_data,i2c_read_data);
+                $display("did not receive expected i2c data");
                 $stop();
             end
-        end
-        if(i2c_read_data!=i2c_tx_byte[7:0])
-        begin
-            $display("sent data=%B (%h)",i2c_tx_byte[7:0],i2c_tx_byte[7:0]);
-            $display("received data=%B (%h)",i2c_read_data,i2c_read_data);
-            $display("did not receive expected i2c data");
-            $stop();
-        end
         end
         if(i2c_rx_byte[0]==ACK)
         begin
@@ -725,7 +727,7 @@ task TEST_WRITE_BYTES_TO_SLAVE_FAILS_IF_SENDS_NO_DATA_ACK_FOR_LAST_BYTE();
     send_ack_nak(ACK);
     //read the bytes the i2c device sends and send back acks on all but the last one
     //this should cause the i2c master to signal transfer failed
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_write_data=i2c_bytes_to_send[i2c_bytes_to_send_counter+1];
         read_bits_from_i2c_sda_w(8);
@@ -780,7 +782,7 @@ task TEST_CONTINIOUS_START_TRIGGER();
     end
     send_ack_nak(ACK);
     //read the bytes the i2c device sends and send back acks 
-    for(i2c_bytes_to_send_counter=1;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=1;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_write_data=i2c_bytes_to_send[i2c_bytes_to_send_counter];
         read_bits_from_i2c_sda_w(8);
@@ -824,7 +826,7 @@ task TEST_CONTINIOUS_START_TRIGGER();
     send_ack_nak(ACK);
     i2c_start=0;
     //send bytes for i2c to read
-    for(i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
+    for(int i2c_bytes_to_send_counter=0;i2c_bytes_to_send_counter<i2c_bytes_to_send_size;i2c_bytes_to_send_counter++)
     begin
         i2c_tx_byte[7:0]=i2c_bytes_to_send[i2c_bytes_to_send_counter];
         write_bits_to_i2c_sda_w(8);//write the byte
@@ -978,6 +980,244 @@ task TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS
 	$display("test done");
 endtask
 
+//this probably doesn't test the bus lockup timeout fully.
+task TEST_READ_BYTES_FROM_SLAVE_WITH_LOCKED_BUS();
+    $display("test read bytes from slave with bus locked up...");
+    i2c_nbytes_in=i2c_bytes_to_send_size;
+    i2c_rw_mode=I2C_MODE_READ;
+    i2c_addr_in=I2C_ADDRESS;
+    i2c_write_data=8'bx;
+    if(!i2c_bus_idle)
+    begin
+        $display("bus not idle before sending start signal");
+        $stop();
+    end
+    if(i2c_tranfer_timeout)
+    begin
+        $display("i2c_tranfer_timeout before sending start signal");
+        $stop();
+    end
+    i2c_start=1;
+    clk();
+    i2c_start=0;
+    //wait for start
+    wait_for_start(2);
+    //read a byte and send an ack
+    read_bits_from_i2c_sda_w(8);
+    send_ack_nak(ACK);
+    i2c_scl_private=0;//start clock lockup
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS;i=i+1)
+    begin
+        if(i2c_tranfer_timeout^i2c_tranfer_failed)
+        begin
+            if(i2c_tranfer_timeout)
+            begin
+                $display("i2c_tranfer_timeout but not i2c_tranfer_failed");
+            end
+            if(i2c_tranfer_failed)
+            begin
+                $display("i2c_tranfer_failed but not i2c_tranfer_timeout");
+            end
+            $stop();
+        end
+        if(i2c_tranfer_timeout&&i2c_tranfer_failed)
+        begin
+            $display("tranfer_timeout and i2c_tranfer_failed as expected");
+            break;
+        end
+        clk();
+        if(i==(I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS-1))
+        begin
+            $display("expected tranfer_timeout and i2c_tranfer_failed but not detected in time");
+            $stop();
+        end
+    end
+    i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);//wait a bit
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_scl_private=1;//stop clock streach
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_clk_cycles_wait(1);//idle will take a cycle to change
+    if(!i2c_bus_idle)
+    begin
+        $display("bus is not idle and not expected");
+        $stop();
+    end
+    //try sending a packet if the bus is already locked
+    i2c_scl_private=0;//lock bus
+    i2c_start=1;
+    clk();
+    i2c_start=0;
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS;i=i+1)
+    begin
+        if(i2c_sda_w==0)
+        begin
+            $display("sda_w went low and wans't expected");
+            $stop();
+        end
+        if(i2c_tranfer_timeout^i2c_tranfer_failed)
+        begin
+            if(i2c_tranfer_timeout)
+            begin
+                $display("i2c_tranfer_timeout but not i2c_tranfer_failed");
+            end
+            if(i2c_tranfer_failed)
+            begin
+                $display("i2c_tranfer_failed but not i2c_tranfer_timeout");
+            end
+            $stop();
+        end
+        if(i2c_tranfer_timeout&&i2c_tranfer_failed)
+        begin
+            $display("tranfer_timeout and i2c_tranfer_failed as expected");
+            break;
+        end
+        clk();
+        if(i==(I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS-1))
+        begin
+            $display("expected tranfer_timeout and i2c_tranfer_failed but not detected in time");
+            $stop();
+        end
+    end
+    i2c_scl_private=1;//stop clock streach
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_clk_cycles_wait(1);//idle will take a cycle to change
+    if(!i2c_bus_idle)
+    begin
+        $display("bus is not idle and not expected");
+        $stop();
+    end
+
+    //try the sda line
+    i2c_nbytes_in=i2c_bytes_to_send_size;
+    i2c_rw_mode=I2C_MODE_READ;
+    i2c_addr_in=I2C_ADDRESS;
+    i2c_write_data=8'bx;
+    if(!i2c_bus_idle)
+    begin
+        $display("bus not idle before sending start signal");
+        $stop();
+    end
+    if(i2c_tranfer_timeout)
+    begin
+        $display("i2c_tranfer_timeout before sending start signal");
+        $stop();
+    end
+    i2c_start=1;
+    clk();
+    i2c_start=0;
+    //wait for start
+    wait_for_start(2);
+    //read a byte and send an ack
+    read_bits_from_i2c_sda_w(8);
+    send_ack_nak(ACK);
+    i2c_sda_private=0;//start data lockup
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS;i=i+1)
+    begin
+        if(i2c_tranfer_timeout^i2c_tranfer_failed)
+        begin
+            if(i2c_tranfer_timeout)
+            begin
+                $display("i2c_tranfer_timeout but not i2c_tranfer_failed");
+            end
+            if(i2c_tranfer_failed)
+            begin
+                $display("i2c_tranfer_failed but not i2c_tranfer_timeout");
+            end
+            $stop();
+        end
+        if(i2c_tranfer_timeout&&i2c_tranfer_failed)
+        begin
+            $display("tranfer_timeout and i2c_tranfer_failed as expected");
+            break;
+        end
+        clk();
+        if(i==(I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS-1))
+        begin
+            $display("expected tranfer_timeout and i2c_tranfer_failed but not detected in time");
+            $stop();
+        end
+    end
+    i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);//wait a bit
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_sda_private=1;//stop data lock
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_clk_cycles_wait(1);//idle will take a cycle to change
+    if(!i2c_bus_idle)
+    begin
+        $display("bus is not idle and not expected");
+        $stop();
+    end
+
+    //try sending a packet if the bus is already locked
+    i2c_sda_private=0;//lock bus  
+    i2c_start=1;
+    clk();
+    i2c_start=0;
+    for(int i=0;i<I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS;i=i+1)
+    begin
+        if(i2c_scl_w==0)
+        begin
+            $display("scl_w went low and wans't expected");
+            $stop();
+        end
+        if(i2c_tranfer_timeout^i2c_tranfer_failed)
+        begin
+            if(i2c_tranfer_timeout)
+            begin
+                $display("i2c_tranfer_timeout but not i2c_tranfer_failed");
+            end
+            if(i2c_tranfer_failed)
+            begin
+                $display("i2c_tranfer_failed but not i2c_tranfer_timeout");
+            end
+            $stop();
+        end
+        if(i2c_tranfer_timeout&&i2c_tranfer_failed)
+        begin
+            $display("tranfer_timeout and i2c_tranfer_failed as expected");
+            break;
+        end
+        clk();
+        if(i==(I2C_CLK_SYSTEM_CYCLES_PER_BIT*I2C_TIMEOUT_IN_I2C_CLKS-1))
+        begin
+            $display("expected tranfer_timeout and i2c_tranfer_failed but not detected in time");
+            $stop();
+        end
+    end
+    i2c_sda_private=1;//stop data streach
+    if(i2c_bus_idle)
+    begin
+        $display("bus is idle and not expected");
+        $stop();
+    end
+    i2c_clk_cycles_wait(1);//idle will take a cycle to change
+    if(!i2c_bus_idle)
+    begin
+        $display("bus is not idle and not expected");
+        $stop();
+    end
+endtask
+
 initial begin
 
 `ifdef TEST_FAILS_ON_NO_SLAVE_ATTATCHED_WRITE
@@ -1022,6 +1262,11 @@ initial begin
 `ifdef TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES
     i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);
     TEST_FOR_TWO_WRITES_SUCH_THAT_THE_SECOND_ONE_HAPPENS_ABOUT_THE_SAME_TIME_AS_THE_FIRST_ONE_FINISHES();
+`endif
+
+`ifdef TEST_READ_BYTES_FROM_SLAVE_WITH_LOCKED_BUS
+    i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);
+    TEST_READ_BYTES_FROM_SLAVE_WITH_LOCKED_BUS();
 `endif
 
     i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);

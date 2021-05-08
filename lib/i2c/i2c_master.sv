@@ -26,7 +26,8 @@ module i2c_master
 #(
 parameter CLK_SYSTEM_FREQUENCY = 50000000,//FPGA system clock speed
 parameter I2C_BAUD_RATE = 100000,//desired I2C baud rate
-parameter I2C_BAUD_RATE_MAX_ERROR = 0.25//maximum I2C baud rate error
+parameter I2C_BAUD_RATE_MAX_ERROR = 0.25,//maximum I2C baud rate error
+parameter I2C_TIMEOUT_IN_I2C_CLKS = I2C_BAUD_RATE/4// I2C_BAUD_RATE/4--> 1/4 of a second. number of clocks before fail and timeout are asserted. if a slave has locked the bus we need some way to say when this happens. The stupid thing about i2ic are the lock ups and you sometimes need another pin to each slave device to reset them. spi is way better.
 )
 (
 	input wire clk,//FPGA system clock
@@ -43,7 +44,8 @@ parameter I2C_BAUD_RATE_MAX_ERROR = 0.25//maximum I2C baud rate error
 	output reg rx_data_ready,//when high read_data will be valid
 	
 	output logic idle,//when high a new transfer can be triggered
-	output logic tranfer_failed,//if a transfer fails this will go high
+	output logic tranfer_failed,//if a transfer fails (either timeout or no responce) this will go high
+	output logic tranfer_timeout,//if a transfer fails due to a timeout this will go high
 		
 	inout wire sda_w,//I2C data line
 	inout wire scl_w//I2C clock line
@@ -163,8 +165,22 @@ assign idle=i2c_bus_available;
 //scl is enabled whenever we are sending or receiving data.
 assign scl=(scl_en)?(i2c_clock_hold||i2c_clock_state==CLK_STATE_MIDDLE_OF_HIGH||i2c_clock_state==CLK_STATE_HIGH_TO_LOW_TRANSITION):1'b1;
 
+//timeout counter used to detect locked bus
+logic [31:0] i2c_timeout;
 always@(posedge clk)
 begin
+	if(strobe&&i2c_clock_state==CLK_STATE_MIDDLE_OF_HIGH)
+	begin
+		if(i2c_timeout!=I2C_TIMEOUT_IN_I2C_CLKS+1)i2c_timeout<=i2c_timeout+1'b1;
+		if(i2c_bus_lines_are_high)i2c_timeout<=0;
+	end
+	if(i2c_timeout==I2C_TIMEOUT_IN_I2C_CLKS)i2c_timeout<=i2c_timeout+1'b1;
+end
+
+//main processing
+always@(posedge clk)
+begin
+	tranfer_timeout<=0;
 	tranfer_failed<=0;
 	rx_data_ready<=0;
 	tx_data_req<=0;
@@ -262,6 +278,8 @@ begin
 				endcase
 				if(!start_trigger)start<=0;
 			end
+
+
 		end
 		else
 		if((i2c_clock_state==CLK_STATE_MIDDLE_OF_LOW)&&(!i2c_clock_hold))//data change time. scl will be low here
@@ -340,7 +358,18 @@ begin
 			end
 			endcase
 		end
+
 	end
+
+	//if tranfer timeout
+	if(i2c_timeout==I2C_TIMEOUT_IN_I2C_CLKS)
+	begin
+		state<=STATE_IDLE;
+		tranfer_failed<=1;
+		tranfer_timeout<=1;
+		start<=0;
+	end
+
 end
 
 
