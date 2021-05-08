@@ -110,8 +110,6 @@ task clk();
 	clk_50M=~clk_50M; 
 endtask
 
-integer test_clock_streaching_delay_clks=0;
-
 logic i2c_start_detected;
 logic i2c_stop_detected;
 logic i2c_last_i2c_sda_w;
@@ -613,7 +611,7 @@ task TEST_READ_BYTES_FROM_SLAVE_WITH_CLOCK_STREACHING();
     end
 
     $display("trying slightly different streaching delays after address ack to see if we can make it glitch...");
-    for(test_clock_streaching_delay_clks=1;test_clock_streaching_delay_clks<=`MAX_CLOCK_STREACHING_DELAYS;test_clock_streaching_delay_clks++)
+    for(int test_clock_streaching_delay_clks=1;test_clock_streaching_delay_clks<=`MAX_CLOCK_STREACHING_DELAYS;test_clock_streaching_delay_clks++)
     begin
         i2c_clk_cycles_wait_and_assert_no_change_of_i2c_bus_state(5);
         $display("test_clock_streaching_delay_clks=%d",test_clock_streaching_delay_clks);
